@@ -1,0 +1,205 @@
+---
+title: "GT Introduction to Analytics Modeling - Week 1 HW"
+author: "Robert Phillips"
+date: "May 18, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The following contains the original questions along with answers and the R code that was used.
+
+### Question 1
+_Describe	a	situation	or	problem	from	your	job,	everyday	life,	current	events,	etc.,	for	which	a	
+classification	model	would	be	appropriate.	List	some	(up	to	5)	predictors	that	you	might	use._
+
+__Answer__
+I recently completed a company wide survey.  It would be interesting to use the survey data create classifications of employees (personas) that could be used to forulate action plans.  Predictors would be the question responses, most of which were on a scale of 1 to 5.  A supervised method such as SVM would require manual labeling of a subset of the data to use for training and testing.  Or it may be possible to use an unsupervised method such as clustering to build labels.
+
+### Question 2
+_The file credit_card_data.txt contains a dataset with 654 data points, 6 continuous and 4 binary predictor variables. It has anonymized credit card applications with a binary response variable (last column) indicating if the application was positiv or negative. The dataset is the "Credit Approval Data Set" from the UCI Machine Learning Repository (https://archive.ics.uci.edu/ml/datasets/Credit+Approval) without the categorial variables and without data points that have missing values._
+
+We load the data with the following snippet.
+
+```{r}
+filename = 'credit_card_data-headers.txt'
+data = read.csv(filename, header=T, sep='\t')
+```
+
+__Part 1__ 
+_Using the support vector machine function ksvm contained in the R package kernlab, find a good classifier for this data. Show the equation of your classifier, and how well it classifies the data points in the full data set._
+
+```{r message=FALSE}
+require(kernlab)
+```
+
+We first fit a model using the values suggested in the assignment.  Therfore we use the 'vanilladot' kernel with C = 100 We also set the type to 'C-svc' since this is a classification exercise.
+
+```{r}
+fit.def = ksvm(R1~., data = data, scaled = T, kernal='vanilladot', type='C-svc', C=100)
+fit.def.err = error(fit.def)
+```
+
+This gives a training error `r fit.def.err`.  
+
+To improve on this, we can attempt to determine a better value for the __C__ parameter as suggested in the assignment. To do this, we try 5 different values starting with the value suggested in the assigment (100) and then increasing by 20%.
+
+```{r}
+C = 100
+N = 5
+inc = .2
+results = data.frame(C=rep(0,N), err=rep(0,N))
+for (i in 1:N) {
+  C = C * (1 + inc)^i
+  fit = ksvm(R1~., data = data, scaled = T, kernal='vanilladot', type='C-svc', C=C)
+  fit.err = error(fit)
+  results[i,] = list(C, fit.err)
+}
+results
+```
+
+The results show an improvement in the error rate with respect to the training set.  However, it remains to be seen if this generalizes well.  We can also extract the coefficients which provide insight to our linear classifier.  Note that we use the last model generated in the previous code snippet.
+
+```{r}
+a	<- colSums(data[fit@SVindex,1:10] * fit@coef[[1]])
+a
+a0	<- sum(a*data[1,1:10]) - fit@b
+a0
+```
+
+__Part 2__
+_Using the k-nearest-neighbors classification function kknn contained in the R package kknn, suggest a good value of k, and show how well it classifies that data points in the full data set._
+
+```{r message=FALSE}
+require(kknn)
+```
+
+Let's first create a model using a random sample of our data set to create training and test data. Specially, we'll sample 90% of the data to train the model and inspect performance on the remaining 10%.
+
+```{r}
+set.seed(1)
+m <- dim(data)[1]
+train <- sample(1:m, size = round(m*.9), replace = FALSE, 
+              prob = rep(1/m, m)) 
+data.train <- data[train,]
+data.test <- data[-train,]
+
+fit.def <- kknn(R1~., data.train, data.test, scale=T, k=5)
+```
+
+We can use a confusion matrix to view the error on our test set.
+```{r}
+fit.conf = table(data.test$R1, fitted(fit.def) >= .5)
+fit.conf
+
+fit.err = (fit.conf[1,2] + fit.conf[2,1])/sum(fit.conf)
+```
+
+This yields a training error of ```r fit.err```.  As before, we can train with different values of k and inspect the results in attempt to find a more optimal k.
+
+```{r}
+ks = c(1,3,7,9)
+results = data.frame(k=ks, err=c(0,0,0,0))
+
+for (k in ks) {
+  fit <- kknn(R1~., data.train, data.test, scale=T, k=k)
+  
+  fit.conf = table(data.test$R1, fitted(fit) >= .5)
+  fit.err = (fit.conf[1,2] + fit.conf[2,1])/sum(fit.conf)
+  results[results$k==k,]$err = fit.err
+}
+results
+```
+
+These results indcate that a model with k = 5 will perform best.
+
+###Question 3
+_Using the same data set as Question 2 use the ksvm or kknn function to find a good classifier:_
+
+(a) _using cross-validation for the k-nearest-neighbors model; and_
+(b) _splitting the data into training, validation, and test data sets._
+
+__Part a__ 
+We'll use 5 folds for the cross validation. This means we'll need 5 partitions of our data.
+
+```{r}
+set.seed(1)
+folds = 5
+folds.id = sample(1:folds, nrow(data), replace=T)
+```
+
+As in question 2 in this assignment, we'll attempt to determine the optimal value of k by iterating over different values of k.
+
+```{r}
+ks = c(1,3,5,7,9)
+```
+
+Now we will train and test each value of k on each partition.
+
+```{r}
+ks.n = length(ks)
+results = data.frame(k=ks, f1=rep(0,ks.n), f2=rep(0,ks.n), f3=rep(0,ks.n),
+                     f4=rep(0,ks.n), f5=rep(0,ks.n))
+
+for (i in 1:folds) {
+  train = data[i != folds.id, ]
+  test = data[i == folds.id, ]
+
+  for (k in ks){
+    fit <- kknn(R1~., train, test, scale=T, k=k)
+    
+    fit.conf = table(test$R1, fitted(fit) >= .5)
+    fit.err = (fit.conf[1,2] + fit.conf[2,1])/sum(fit.conf)
+    results[results$k==k,i+1] = fit.err
+  }
+  results$mean.err = rowMeans(results[,-1])
+}
+
+results
+```
+
+These mean error measurement indicates that k = 5 and k = 7 perform the best with nearly identical results.
+
+__Part b__
+We split the data into 3 partions.  The training and validation set will be used to determine an optimal value of k and then we will provide the resulting performance using the test set.  We will using 60% of the data for training, 20% for validation, and 20% for testing.
+
+```{r}
+set.seed(1)
+set.id = sample(1:3, nrow(data), replace=T, prob=c(.6,.2,.2))
+
+train = data[set.id == 1, ]
+valid = data[set.id == 2, ]
+test = data[set.id == 3, ]
+```
+
+Using knn as our classifier, we can iterate over different values of k for training and validation.
+
+```{r}
+ks = c(1,3,5,7,9)
+results = data.frame(k=ks, err=c(0,0,0,0,0))
+
+for (k in ks){
+  fit <- kknn(R1~., train, valid, scale=T, k=k)
+  
+  fit.conf = table(valid$R1, fitted(fit) >= .5)
+  fit.err = (fit.conf[1,2] + fit.conf[2,1])/sum(fit.conf)
+  results[results$k==k, "err"] = fit.err
+}
+results
+
+k.opt = results[which.min(results$err), "k"]
+```
+
+This yields an optimal k of ```r k.opt```.  We can now evaulate on the test set.
+
+```{r}
+fit <- kknn(R1~., train, test, scale=T, k=k)
+fit.conf = table(test$R1, fitted(fit) >= .5)
+fit.err = (fit.conf[1,2] + fit.conf[2,1])/sum(fit.conf)
+```
+
+Using k = ```r k.opt``` leads to an error of ```r fit.err```.  This is higher than on the validation set which is generally expected.

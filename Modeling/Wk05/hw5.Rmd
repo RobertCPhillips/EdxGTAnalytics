@@ -1,0 +1,128 @@
+---
+title: "GT Introduction to Analytics Modeling - Week 5 HW"
+author: "Robert Phillips"
+date: "June 17, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###Question 1
+
+Using the crime data set from Homework 3, build a regression model using:
+
+1. Stepwise regression
+2. Lasso
+3. Elastic net
+
+For Parts 2 and 3, remember to scale the data first - otherwise, the regression coefficients will be on different scales and the constraint won't have the desired effect.
+
+We first load the data and create a matrix of the scaled predictors.
+
+```{r}
+crimes = read.csv('uscrime.txt', header=T, sep='\t')
+crimes.m = scale(as.matrix(crimes[,1:15]))
+
+str(crimes)
+```
+
+#### Part 1 - Stepwise regression
+
+For stepswise regression, we'll start with the full model and then use the _step_ function to select the best predictors.
+```{r}
+crimes.fit = lm(Crime ~ ., data=crimes)
+summary(crimes.fit)
+```
+Using all predictors indicates that most factors are not signficant.  Let's see what a stepwise approach yeilds.
+
+```{r}
+crimes.fit.step = step(crimes.fit)
+```
+
+The resulting model is:
+
+```{r}
+crimes.fit.step$coefficients
+```
+
+For part 2 and 3, we'll use the _glmnet_ package as suggested by the assigment.
+
+```{r message=F}
+require(glmnet)
+```
+
+#### Part 2 - Lasso
+
+According to the _glmnet_ documentation, for family="gaussian" this is the lasso sequence if alpha=1, else it is the elasticnet sequence.  Therefore we'll set alpha=1 for this part.
+
+```{r}
+crimes.fit.lasso = glmnet(crimes.m, crimes$Crime, family="gaussian", alpha=1)
+print(crimes.fit.lasso)
+```
+
+We can see from the output that about 75% of the variance is explained when lambda is about 15.  This yields the following model. We see that 6 factors are omitted.  We can further reduce the number of factors by increasing lambda.
+
+```{r}
+coef(crimes.fit.lasso, s = 15, exact = F)
+```
+
+#### Part 3 - Elastic net
+
+```{r}
+crimes.fit.elas = glmnet(crimes.m, crimes$Crime, family="gaussian", alpha=.5)
+print(crimes.fit.elas)
+```
+
+We can see from the output that about 75% of the variance is explained when lambda is about 20.  This yields the following model.  We see that only 2 factors are omitted.  We can further reduce the number of factors by increasing lambda.
+
+```{r}
+coef(crimes.fit.elas, s = 20, exact = F)
+```
+
+###Question 2
+Describe a situation or problem from your job, everyday life, current events, etc., for which a design of experiments approach would be appropriate.
+
+__Answer__:
+With the intent of maximizing sales, ecommerce sites can benefit from functionality that allows the behavior of the site to vary in an experimental way.  The different knobs that can be tuned to change the behavior can be consdered the factors for the experiment. A stakeholder can tune these knobs therefore creating an experiment than can then be tied to results (sales).
+
+###Question 3
+To determine the value of 10 different yes/no features to the market value of a house (large yard, solar roof, etc.), a real estate agent plans to survey 50 potential buyers, showing a fictitious house with different combinations of features. To reduce the survey size, the agent wants to show just 16 fictitious houses. 
+
+Use R's FrF2 function (in the FrF2 package) to find a fractional factorial design for this experiment: what set of features should each of the 16 fictitious houses? Note: the output of FrF2 is 1 (include) or -1 (don't include) for each feature.
+
+```{r, message=F}
+require(FrF2)
+```
+
+The assignment indicates 10 different factors are being considered, and we want to encapsulate those within 16 different houses.  We'll use these parameters to generate designs.
+
+```{r}
+houses = FrF2(nruns=16, nfactors=10)
+houses
+```
+
+Instead of inventing arbitrary feature names, we let the function generate the factors names, which are A - K in this case.  As shown in the output, we have 16 different designs represeting the 16 different houses.
+
+###Question 4
+For each of the following distributions, give an example of data that you would expect to follow this distribution (besides the examples already discussed in class).
+
+a. __Binomial__
+The Binomial Distribution is prevelant in many games and sports where the goal is to hit a target.  Examples are shooting free throws in basketball and hitting the bullseye with an arrow.  Application of this distribution in these scenarios assumes that each attempt is independent, and the probability of success is the same.  This seems reasonable for both scenarios.  In the context of a single competition, the probabability of success would be consistent.  And since the type of acitivity is void of external influences (e.g. a defensive opponent in basketball).
+
+b. __Geometric__
+Using the convention that the Geometric distribution reperesents the number of attempts to achieve the first success,  hitting a bullseye with an arrow is one example.  As with the Binomial distribution, we assume independence between attempts and a consistent probability of success for each attempt.
+
+c. __Poisson__
+The Poisson Distribution represents the number of events occuring within a specified interval.  We assume that the occurrance of events are independent and the rate of occurance is the same across all intervals. This distribution is commonly applied to model arrivals in retail.  This could be arrivals at a brick and mortor storefront, or visitors to an ecommerce web site.
+
+d. __Exponential__
+The Exponential Distribution models the time between events in Poisson processes.  Using our previous example of modeling visitors to an ecommerice web site, this distribution could model the time between each new visitor.
+
+e. __Weibull__
+The Weibull Distribution is used to model the time to failure.  Technologies such as Amazon Web Services and Microsoft Azure utilize large installations of machines.  These machines can fail for a number of reasons.  For example, this distribution can be used to model the time until hard drive failure.
+
+

@@ -1,0 +1,224 @@
+---
+title: "GT Introduction to Analytics Modeling - Week 4 HW"
+author: "Robert Phillips"
+date: "June 7, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###Question 1
+_Using the same crime data set as in Homework 3 Question 4, apply Principal Component Analysis and then create a regression model using the first 4 principal components. Specify your new model in terms of the original variables (not the principal components), and compare its quality to that of your solution to Homework 3 Question 4. You can use the R function prcomp for PCA. (Note that to first scale the data, you can include scale. = TRUE to scale as part of the PCA function.)_
+
+We first load the data, and then run PCA on all columns except for the Crime column since Crime is the response. We can then output the principal components to inspect the results.
+
+```{r}
+crimes = read.csv('uscrime.txt', header=T, sep='\t')
+crimes.pca = prcomp(crimes[1:ncol(crimes)-1], scale=T, center=T)
+summary(crimes.pca)
+
+#proportion of variance for first 4
+crimes.pca.4 = sum(crimes.pca$sdev[1:4]^2)/sum(crimes.pca$sdev^2)
+```
+
+We can see that ```r crimes.pca.4*100```% of the variance is captured by the first 4 principal components. 
+
+We need our model from the previous homework for comparison.  I used all factors in that model, so we'll repeat that here.
+
+```{r}
+crimes.fit = lm(Crime ~ ., data=crimes)
+summary(crimes.fit)
+
+plot(crimes$Crime, resid(crimes.fit), ylab="residuals", xlab="Crimes per 100,000") 
+abline(0, 0)
+```
+
+We'll now create a linear regression model using these 4 principal components.
+
+```{r}
+crimes.pca.data = data.frame(crimes.pca$x[, 1:4], crime=crimes$Crime)
+crimes.pca.fit = lm(crime ~ ., data=crimes.pca.data)
+summary(crimes.pca.fit)
+
+plot(crimes$Crime, resid(crimes.pca.fit), ylab="residuals (via PCA)", xlab="Crimes per 100,000")
+abline(0, 0)
+```
+
+This plot shows a trend in the residuals which is often a sign a linear model may be problemattic.  Regardless, we can use the 4 non-intercept coefficents to reclaim the coefficients in the original model.
+
+```{r}
+crimes.orig = crimes.pca.fit$coefficients[2:5] %*% t(crimes.pca$rotation[,1:4])
+crimes.orig
+```
+
+We can multiply these by the original crimes values to determine predictions, from which we can compute residuals.
+
+```{r}
+crimes.predict = as.matrix(crimes[1:ncol(crimes)-1]) %*% t(crimes.orig)
+residuals = crimes$Crime - crimes.predict
+
+plot(crimes$Crime, residuals, ylab="residuals", xlab="Crimes per 100,000")
+abline(0, 0)
+```
+
+These residuals seem worse.  Seems like I am missing a step somewhere.
+
+###Question 2
+_Using the same crime data set as in Homework 3 Question 4, find the best model you can using (a) a regression tree model, and (b) a random forest model. In R, you can use the tree package or the rpart package, and the randomForest package. For each model, describe one or two qualitative takeaways you get from analyzing the results (i.e., don't just stop when you have a good model, but interpret it too)._
+
+```{r message=FALSE}
+require(rpart)
+require(rpart.plot)
+require(randomForest)
+```
+
+####Part a
+For part (a) we build a regression tree using rpart.
+
+```{r}
+crimes.tree = rpart(Crime ~ ., data=crimes, method="anova")
+rpart.plot(crimes.tree)
+```
+
+This plot shows that we split on the 3 variables named __Po1__, __Pop__, __NW__.  One the left side of the tree, the model predicts cities with an expenditure less than 7.7 and a population less than 22 (in hundred thousands) will yield 550 offenses (per 100,000).  However, within this branch, with a population greater than 22 (in hundred thousands) predicts 800 offenses.  This increase indicates that population is is signficant.
+
+On the right hand side, where there are greater expenditures, a population with an NW value less than 7.7% of the poulation will yield 887 offenses (per 100,000).  However, an NW value greather than 7.7% yeilds 1305 offenses.  This increase indicates that the NW attribute is signficant.
+
+####Part b
+For part (b) we build a random forest model with 500 trees.
+
+```{r}
+set.seed(1)
+crimes.rf = randomForest(Crime ~ ., data=crimes, ntree=500, type="regression")
+crimes.rf.predict = predict(crimes.rf, newdata=crimes, type="response")
+crimes.rf.mse = mean((crimes.rf.predict - crimes$Crime)^2)
+```
+
+This model gives a mean squared error ```r crimes.rf.mse```.  We can tune the parameters to attempt to improve the MSE.  For example, we can limit the number of variables used in each tree and also increase the number of trees.
+
+```{r}
+set.seed(1)
+crimes.rf2 = randomForest(Crime ~ ., data=crimes, ntree=1000, type="regression", mtry=5)
+crimes.rf2.predict = predict(crimes.rf2, newdata=crimes, type="response")
+crimes.rf2.mse = mean((crimes.rf2.predict - crimes$Crime)^2)
+```
+
+This model gives a mean squared error ```r crimes.rf2.mse```.  This doesn't to improve the MSE metric.  Addtional approaches could be applied to continue to tune other parametetrs.
+
+###Question 3
+_Describe a situation or problem from your job, everyday life, current events, etc., for which a logistic regression model would be appropriate. List some (up to 5) predictors that you might use._
+
+__Answer:__
+An appealing aspect of logistic regression is interpreting it as a probability. This can be especially useful in a binary classification scenario (i.e. deciding whether or not to take action).  For example, given customer survey data and even unstructured data such as written feedback, we can build a model to determine whether or not an observation represents positive sentiment. We would adjust a threshold property to determine an appropriate value (probability) that indicates positive sentiment.  An ROC curve would help do this. We would just need to decide on the impact of false negatives and false positives.
+
+Regarding predictors, we'd likely capture demographic data as well as a number of questions related to sentiment.  For example, questions related to satisfaction, quantification of interaction with the service, as well as others.
+
+###Question 4
+
+1. _Using the GermanCredit data set at http://archive.ics.uci.edu/ml/machine-learningdatabases/statlog/german/ use logistic regression to find a good predictive model for whether credit applicants are good credit risks or not. Show your model (factors used and their coefficients), the software output, and the quality of fit. You can use the glm function in R. To get a logistic regression (logit) model on data where the response is either zero or one, use family=binomial(link="logit") in your glm function call._
+
+2. _Because the model gives a result between 0 and 1, it requires setting a threshold probability to separate between "good" and "bad" answers. In this data set, they estimate that incorrectly identifying a bad customer as good, is 5 times worse than incorrectly classifying a good customer as bad. Determine a good threshold probability based on your model._
+
+####Part 1
+We first load the data. We'll transform the response column 'V21' to 0 and 1 since that is what the _glm_ function requires.  We'll also split the data into a training and test set to aid in selecting a _good_ model.
+
+```{r}
+#load the file
+credit = read.csv('germancredit.txt', header=F, sep=' ')
+#update the response column to 0 = Bad
+credit$V21 = sapply(credit$V21, function(x){if (2 == x) 0 else x})
+
+#use randomization to split the data into training and test data
+set.seed(1)
+
+m <- dim(credit)[1]
+#sample 80% for training
+train <- sample(1:m, size = round(m*.8), replace=F)
+
+credit.train <- credit[train,]
+credit.test <- credit[-train,] 
+```
+
+The data consists of numerical and categorical values.  Using all of these attributes may lead to a model that is difficult to interpret.  But removing attributes may require some domain knowledge. So we can start by training a model on all of the parameterts to determine which are indicated to have signficance.
+
+* Attribute 1: (qualitative) - Status of existing checking account 
+* Attribute 2: (numerical) - Duration in month 
+* Attribute 3: (qualitative)  - Credit history 
+* Attribute 4: (qualitative) - Purpose 
+* Attribute 5: (numerical) - Credit amount 
+* Attribute 6: (qualitative) - Savings account/bonds 
+* Attribute 7: (qualitative) - Present employment since 
+* Attribute 8: (numerical) - Installment rate in percentage of disposable income 
+* Attribute 9: (qualitative) - Personal status and sex 
+* Attribute 10: (qualitative) - Other debtors / guarantors 
+* Attribute 11: (numerical) - Present residence since 
+* Attribute 12: (qualitative) - Property 
+* Attribute 13: (numerical) - Age in years 
+* Attribute 14: (qualitative) - Other installment plans 
+* Attribute 15: (qualitative) - Housing 
+* Attribute 16: (numerical) - Number of existing credits at this bank 
+* Attribute 17: (qualitative) - Job 
+* Attribute 18: (numerical) - Number of people being liable to provide maintenance for 
+* Attribute 19: (qualitative) - Telephone 
+* Attribute 20: (qualitative) - foreign worker 
+* Attribute 21: (qualitative) - 1 = Good Loan, 2 = Bad Loan 
+
+```{r}
+credit.train.fit <- glm(V21 ~.,family=binomial(link='logit'),data=credit.train)
+summary(credit.train.fit)
+```
+
+We can see from this output that the attributes a number of the attributes show signficance.  We can also see the AIC for this model is ```r credit.train.fit$aic```. 
+
+To strive for simplier models, we'll select attributes V1, V2, V3, V4, V5, V6, V8, and V14.  These attributes appear to be more focused on financial aspects whereas the others are demographic based.  This seems like a reasonable approach for this exercise.  So let's create a model using these values.
+
+```{r}
+credit.train.fit2 <- glm(V21~V1+V2+V3+V4+V5+V6+V8+V14,family=binomial(link='logit'),data=credit.train)
+summary(credit.train.fit2)
+```
+
+This model has an AIC of ```r credit.train.fit2$aic```.  Perhaps we have an improved model.  However, we see that attributes V5 and V6 may be less signficant.  So let's create a new model without them.
+
+```{r}
+credit.train.fit3 <- glm(V21~V1+V2+V3+V4+V8+V14,family=binomial(link='logit'),data=credit.train)
+summary(credit.train.fit3)
+```
+
+This model has an AIC of ```r credit.train.fit3$aic```.  Perhaps we have an improved model. Now let's compare AIC on test set.
+
+```{r}
+credit.test.fit <- glm(V21~.,family=binomial(link='logit'),data=credit.test)
+credit.test.fit2 <- glm(V21~V1+V2+V3+V4+V5+V6+V8+V14,family=binomial(link='logit'),data=credit.test)
+credit.test.fit3 <- glm(V21~V1+V2+V3+V4+V8+V14,family=binomial(link='logit'),data=credit.test)
+```
+
+This yields AIC values ```r credit.test.fit$aic```, ```r credit.test.fit2$aic```, and ```r credit.test.fit3$aic``` respectively.  This indicates that the original model with all of the parameters may be best as the relative likelihood of that model as compared to the minimum is ```r exp((credit.test.fit3$aic-credit.test.fit$aic)/2)```.  However this is small value, therefore we may need explore better techniques for attribute selection in future exercises.
+
+###Part 2
+We now set out to determine a value of p that minimizes the cost of using our model.  We'll use model 1 for this part of the exercise, which is the model with all of the attributes.  We'll use the predict function to obtain a predicted response, and then vary p to measure cost.  The cost is a sum of loans we should have made + 5 * loans we shouldn't have made.
+
+```{r}
+credit.pred = predict(credit.test.fit, credit.test, type="response")
+credit.test$predicted.V21 = credit.pred
+
+p = .3
+credit.test.fit.t1 = table(credit.test$V21, credit.pred >= p)
+credit.test.fit.t1
+cost1 = credit.test.fit.t1[2,1] + credit.test.fit.t1[1,2] * 5
+  
+p = .5
+credit.test.fit.t2 <- table(credit.test$V21, credit.pred >= p)
+credit.test.fit.t2
+cost2 = credit.test.fit.t2[2,1] + credit.test.fit.t2[1,2] * 5
+
+p = .7
+credit.test.fit.t3 <- table(credit.test$V21, credit.pred >= p)
+credit.test.fit.t3
+cost3 = credit.test.fit.t3[2,1] + credit.test.fit.t3[1,2] * 5
+```
+
+This result indicates that a higher threashold is safer (as expected) since cost of p=.7 is ```r cost3``` whereas the cost of the other 2 is ```r cost2``` and ```r cost1```.
